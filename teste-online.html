@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teste de sala online - Jogo Animê das Meninas</title>
+<style>
+body{margin:0;font-family:system-ui,sans-serif;background:#f6e9f7;color:#3b1d4f;display:grid;place-items:center;min-height:100vh;padding:16px;box-sizing:border-box}
+.card{background:#fff;border:2px solid #e6cdee;border-radius:18px;padding:20px;max-width:420px;width:100%;display:flex;flex-direction:column;gap:12px}
+h1{margin:0;font-size:22px;color:#d92e94}
+input{font:inherit;padding:8px;border:2px solid #e6cdee;border-radius:10px}
+button{font:inherit;font-weight:600;border:0;border-radius:12px;padding:10px 14px;background:#d92e94;color:#fff;cursor:pointer}
+button.g{background:#fff;color:#7a5a8f;border:2px solid #e6cdee}
+button:disabled{opacity:.5}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.slot{display:flex;justify-content:space-between;align-items:center;border:2px solid #e6cdee;border-radius:12px;padding:8px 12px}
+.slot.me{border-color:#d92e94;background:#fdeaf6}
+#st{font-size:14px}.ok{color:#1a8a4a}.err{color:#c0262d}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Teste de sala online</h1>
+  <div id="st">Conectando ao Firebase...</div>
+  <div id="home" hidden>
+    <input id="nome" maxlength="14" placeholder="Seu nome" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+    <div class="row"><button id="criar">Criar sala</button></div>
+    <p style="margin:10px 0 6px">ou entre com um código:</p>
+    <div class="row"><input id="cod" maxlength="4" placeholder="CÓDIGO" style="text-transform:uppercase"><button id="entrar">Entrar</button></div>
+  </div>
+  <div id="sala" hidden>
+    <h2 style="margin:0 0 8px;font-size:18px">Sala <span id="rc"></span></h2>
+    <div id="slots" style="display:flex;flex-direction:column;gap:8px"></div>
+    <button class="g" id="sair" style="margin-top:10px;width:100%">Sair da sala</button>
+  </div>
+</div>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {getAuth,signInAnonymously} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {getDatabase,ref,set,get,remove,onValue,runTransaction,onDisconnect} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+const cfg={
+  apiKey:"AIzaSyDju9vUp00qZBo5Coio8raIpYaguFLOPRU",
+  authDomain:"jogo-das-meninas-anime.firebaseapp.com",
+  databaseURL:"https://jogo-das-meninas-anime-default-rtdb.firebaseio.com",
+  projectId:"jogo-das-meninas-anime",
+  storageBucket:"jogo-das-meninas-anime.firebasestorage.app",
+  messagingSenderId:"490614504714",
+  appId:"1:490614504714:web:2b99a6a33d9c1edbf04ef3"};
+const $=id=>document.getElementById(id);
+const CORES=['Vermelha','Cinza','Verde','Azul'];
+const st=(t,c)=>{$('st').textContent=t;$('st').className=c||''};
+let uid=null,code=null,stop=null,mine=-1;
+try{
+  const app=initializeApp(cfg),auth=getAuth(app),db=getDatabase(app);
+  const cred=await signInAnonymously(auth);uid=cred.user.uid;
+  st('Conectado ao Firebase ✓','ok');$('home').hidden=false;
+  const nome=()=>$('nome').value.trim()||'Jogadora';
+  const abrir=c=>{
+    code=c;$('home').hidden=true;$('sala').hidden=false;$('rc').textContent=c;
+    stop=onValue(ref(db,'rooms/'+c),s=>{
+      const v=s.val()||{},sl=v.slots||{};mine=-1;
+      $('slots').innerHTML=CORES.map((cor,i)=>{
+        const o=sl[i];if(o&&o.uid===uid)mine=i;
+        const me=o&&o.uid===uid;
+        return `<div class="slot${me?' me':''}"><b>${cor}</b><span>${o?(o.name+(me?' (você)':'')+(v.host===o.uid?' · anfitriã':'')):'livre'}</span>${o?'':`<button data-i="${i}">Escolher</button>`}</div>`}).join('');
+    });
+  };
+  const sairSala=async()=>{
+    if(!code)return;if(stop)stop();
+    if(mine>=0){await remove(ref(db,`rooms/${code}/slots/${mine}`))}
+    code=null;$('sala').hidden=true;$('home').hidden=false;
+  };
+  $('criar').onclick=async()=>{
+    const L='ABCDEFGHJKMNPQRSTUVWXYZ';let c;
+    for(let t=0;t<10;t++){c=Array.from({length:4},()=>L[Math.floor(Math.random()*L.length)]).join('');if(!(await get(ref(db,'rooms/'+c))).exists())break}
+    await set(ref(db,`rooms/${c}/host`),uid);abrir(c);
+  };
+  $('entrar').onclick=async()=>{
+    const c=$('cod').value.trim().toUpperCase();if(c.length!==4)return st('Digite o código de 4 letras.','err');
+    if(!(await get(ref(db,'rooms/'+c))).exists())return st('Sala não encontrada.','err');
+    st('Conectado ao Firebase ✓','ok');abrir(c);
+  };
+  $('slots').onclick=async e=>{
+    const b=e.target.closest('button');if(!b)return;const i=+b.dataset.i;
+    if(mine>=0)await remove(ref(db,`rooms/${code}/slots/${mine}`));
+    const r=ref(db,`rooms/${code}/slots/${i}`);
+    const res=await runTransaction(r,cur=>cur?undefined:{uid,name:nome()});
+    if(res.committed)onDisconnect(r).remove();else st('Essa cor acabou de ser escolhida por outra pessoa.','err');
+  };
+  $('sair').onclick=sairSala;
+}catch(e){
+  st('Erro: '+(e.code||e.message)+' (veja as instruções de ajuda)','err');
+}
+</script>
+</body>
+</html>
